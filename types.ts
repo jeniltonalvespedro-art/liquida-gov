@@ -2,7 +2,8 @@ export enum WorkflowStep {
   UPLOAD = 'UPLOAD',
   DATA_ENTRY = 'DATA_ENTRY',
   REVIEW = 'REVIEW',
-  COMPLETED = 'COMPLETED'
+  COMPLETED = 'COMPLETED',
+  DAILY_BATCH = 'DAILY_BATCH'
 }
 
 export interface LiquidationData {

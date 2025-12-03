@@ -26,6 +26,9 @@ const App: React.FC = () => {
   });
   const [isExtracting, setIsExtracting] = useState(false);
   const [sicafChecked, setSicafChecked] = useState(false);
+  
+  // State for accumulated daily batch
+  const [dailyBatch, setDailyBatch] = useState<LiquidationData[]>([]);
 
   const handleNext = async () => {
     if (step === WorkflowStep.UPLOAD) {
@@ -72,16 +75,21 @@ const App: React.FC = () => {
         alert("Por favor, preencha todos os dados da liquidação (Ordem do Ateste, NP, NS e datas).");
         return;
       }
+      
+      // Add current liquidation to daily batch
+      setDailyBatch(prev => [...prev, data]);
+      
       // Simulate Liquidation API call
       setTimeout(() => {
         setStep(WorkflowStep.COMPLETED);
-      }, 1000);
+      }, 500);
     }
   };
 
   const handleBack = () => {
     if (step === WorkflowStep.DATA_ENTRY) setStep(WorkflowStep.UPLOAD);
     if (step === WorkflowStep.REVIEW) setStep(WorkflowStep.DATA_ENTRY);
+    if (step === WorkflowStep.DAILY_BATCH) setStep(WorkflowStep.COMPLETED);
   };
 
   const resetFlow = () => {
@@ -103,29 +111,99 @@ const App: React.FC = () => {
     setStep(WorkflowStep.UPLOAD);
   };
 
+  // Helper to calculate total value
+  const calculateTotal = () => {
+    return dailyBatch.reduce((acc, item) => {
+      // Basic cleaning for Brazilian format string to float
+      const valString = item.valorNota.replace('R$', '').replace(/\./g, '').replace(',', '.').trim();
+      const val = parseFloat(valString) || 0;
+      return acc + val;
+    }, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  };
+
+  const finalizeDailyBatch = () => {
+    if (dailyBatch.length === 0) {
+        alert("Não há itens na remessa.");
+        return;
+    }
+
+    // Prompt user for email address
+    const emailDestino = window.prompt("Digite o endereço de e-mail do Setor de Pagamentos (Gmail):", "financeiro.pagamentos@gmail.com");
+
+    if (!emailDestino) return; // User cancelled
+
+    const totalValue = calculateTotal();
+    const dateStr = new Date().toLocaleDateString('pt-BR');
+
+    // Build plain text body for email
+    let emailBody = `Prezados,\n\nSegue a remessa diária de notas fiscais liquidadas em ${dateStr} para processamento de pagamento:\n\n`;
+
+    dailyBatch.forEach((item, index) => {
+        emailBody += `ITEM ${index + 1}:\n`;
+        emailBody += `NP: ${item.notaPagamento} | NS: ${item.notaSistema}\n`;
+        emailBody += `Processo: ${item.numeroProcesso}\n`;
+        emailBody += `Fornecedor: ${item.fornecedor}\n`;
+        emailBody += `Valor: ${item.valorNota}\n`;
+        emailBody += `Vencimento: ${item.dataVencimento ? new Date(item.dataVencimento).toLocaleDateString('pt-BR') : 'N/A'}\n`;
+        emailBody += `Ordem Ateste: ${item.ordemAteste}\n`;
+        emailBody += `--------------------------------------------------\n`;
+    });
+
+    emailBody += `\nTOTAL DA REMESSA: ${totalValue}\n\n`;
+    emailBody += `Atenciosamente,\nSetor de Liquidação - LiquidaGov`;
+
+    // Encode parameters
+    const subject = encodeURIComponent(`Remessa de Pagamento - ${dateStr}`);
+    const body = encodeURIComponent(emailBody);
+    
+    // Open default mail client
+    window.location.href = `mailto:${emailDestino}?subject=${subject}&body=${body}`;
+
+    // Optionally clear batch after sending
+    setTimeout(() => {
+        const confirmClear = window.confirm("O seu cliente de e-mail deve ter sido aberto. Deseja marcar esta remessa como ENVIADA e limpar a lista?");
+        if (confirmClear) {
+            setDailyBatch([]);
+            resetFlow();
+        }
+    }, 1500);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center">
+          <div className="flex items-center cursor-pointer" onClick={() => step === WorkflowStep.DAILY_BATCH && resetFlow()}>
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold mr-3">L</div>
             <h1 className="text-xl font-bold text-slate-800">LiquidaGov</h1>
           </div>
-          <div className="text-sm text-slate-500">
-            Setor Financeiro
+          <div className="flex items-center space-x-4">
+             {dailyBatch.length > 0 && step !== WorkflowStep.DAILY_BATCH && (
+                 <button 
+                    onClick={() => setStep(WorkflowStep.DAILY_BATCH)}
+                    className="text-sm bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-medium hover:bg-blue-100 transition-colors"
+                 >
+                    Remessa Atual: {dailyBatch.length} nota(s)
+                 </button>
+             )}
+            <div className="text-sm text-slate-500 hidden sm:block">
+              Setor Financeiro
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-3xl mx-auto w-full px-4 sm:px-6 py-8">
+      <main className="flex-1 max-w-4xl mx-auto w-full px-4 sm:px-6 py-8">
         <div className="bg-white shadow-sm rounded-xl border border-slate-200 overflow-hidden">
           
-          {/* Progress Bar */}
-          <div className="bg-slate-50 border-b border-slate-200">
-            <StepIndicator currentStep={step} />
-          </div>
+          {/* Progress Bar - Hide in Daily Batch view */}
+          {step !== WorkflowStep.DAILY_BATCH && (
+            <div className="bg-slate-50 border-b border-slate-200">
+              <StepIndicator currentStep={step} />
+            </div>
+          )}
 
           <div className="p-6 sm:p-8">
             {/* Step 1: Upload */}
@@ -345,7 +423,7 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* Step 4: Completed */}
+            {/* Step 4: Completed (Single Item) */}
             {step === WorkflowStep.COMPLETED && (
               <div className="text-center py-12 animate-fade-in">
                 <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -356,26 +434,112 @@ const App: React.FC = () => {
                 <h2 className="text-3xl font-bold text-slate-900 mb-2">Liquidação Realizada!</h2>
                 <div className="text-slate-600 mb-8 max-w-lg mx-auto bg-slate-50 p-6 rounded-lg border border-slate-200 text-left space-y-2 text-sm">
                   <p><strong>Processo:</strong> {data.numeroProcesso}</p>
-                  <p><strong>Ordem Ateste:</strong> {data.ordemAteste}</p>
                   <p><strong>Nota Pagamento (NP):</strong> {data.notaPagamento}</p>
-                  <p><strong>Nota Sistema (NS):</strong> {data.notaSistema}</p>
-                  <p><strong>Vencimento:</strong> {data.dataVencimento ? new Date(data.dataVencimento).toLocaleDateString('pt-BR') : '-'}</p>
                   <div className="mt-4 pt-4 border-t border-slate-200 text-center text-slate-500 italic">
-                    Encaminhado para o setor de pagamentos.
+                    Adicionado à Remessa Diária ({dailyBatch.length} itens na fila).
                   </div>
                 </div>
-                <button 
-                  onClick={resetFlow}
-                  className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  Liquidar Nova Nota
-                </button>
+                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                    <button 
+                      onClick={resetFlow}
+                      className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                    >
+                      Liquidar Nova Nota
+                    </button>
+                    <button 
+                      onClick={() => setStep(WorkflowStep.DAILY_BATCH)}
+                      className="inline-flex justify-center items-center px-6 py-3 border border-slate-300 text-base font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500"
+                    >
+                      Visualizar Remessa Diária
+                    </button>
+                </div>
               </div>
             )}
+
+            {/* Step 5: Daily Batch Report */}
+            {step === WorkflowStep.DAILY_BATCH && (
+                <div className="animate-fade-in">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-slate-800">Remessa Diária para Pagamento</h2>
+                        <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded border border-blue-200">
+                            {new Date().toLocaleDateString('pt-BR')}
+                        </span>
+                    </div>
+
+                    <p className="text-slate-600 mb-6">
+                        Confira abaixo as notas liquidadas hoje para encaminhamento ao Setor de Pagamentos.
+                    </p>
+
+                    {dailyBatch.length > 0 ? (
+                        <>
+                            <div className="overflow-x-auto border border-slate-200 rounded-lg shadow-sm mb-6">
+                                <table className="min-w-full divide-y divide-slate-200">
+                                    <thead className="bg-slate-50">
+                                        <tr>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">NP</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Processo</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Fornecedor</th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Vencimento</th>
+                                            <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Valor</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-slate-200">
+                                        {dailyBatch.map((item, index) => (
+                                            <tr key={index}>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{item.notaPagamento}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">{item.numeroProcesso}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 max-w-xs truncate">{item.fornecedor}</td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                                                    {item.dataVencimento ? new Date(item.dataVencimento).toLocaleDateString('pt-BR') : '-'}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900 text-right font-medium">{item.valorNota}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    <tfoot className="bg-slate-50">
+                                        <tr>
+                                            <td colSpan={4} className="px-6 py-3 text-right text-sm font-bold text-slate-900">TOTAL DA REMESSA:</td>
+                                            <td className="px-6 py-3 text-right text-sm font-bold text-slate-900">{calculateTotal()}</td>
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+                            <div className="flex justify-end gap-4">
+                                <button
+                                    onClick={() => resetFlow()}
+                                    className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900 font-medium"
+                                >
+                                    Adicionar mais notas
+                                </button>
+                                <button
+                                    onClick={finalizeDailyBatch}
+                                    className="inline-flex items-center px-6 py-2 border border-transparent text-base font-medium rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                                >
+                                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                    </svg>
+                                    Enviar para Setor de Pagamentos
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="text-center py-12 border-2 border-dashed border-slate-300 rounded-lg">
+                            <p className="text-slate-500">Nenhuma nota liquidada hoje ainda.</p>
+                            <button 
+                                onClick={resetFlow} 
+                                className="mt-4 text-blue-600 font-medium hover:underline"
+                            >
+                                Iniciar nova liquidação
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
+
           </div>
 
-          {/* Footer Actions */}
-          {step !== WorkflowStep.COMPLETED && (
+          {/* Footer Actions (Standard Flow) */}
+          {step !== WorkflowStep.COMPLETED && step !== WorkflowStep.DAILY_BATCH && (
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center">
               {step !== WorkflowStep.UPLOAD ? (
                 <button 
