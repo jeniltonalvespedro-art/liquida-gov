@@ -1,0 +1,5 @@
+{
+  "name": "LiquidaGov",
+  "description": "Sistema de gestão de liquidação e pagamento de notas fiscais para autarquias, com extração de dados via IA.",
+  "requestFramePermissions": []
+}
